@@ -1,0 +1,9 @@
+.env
+*.pyc
+__pycache__
+agent-venvv
+
+.chroma/*
+*.chroma
+.sqlite
+*.sqlite
