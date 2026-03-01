@@ -52,7 +52,7 @@ User describes bug
 ### 1. Clone the repository
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/shivangtripathi/bug-fix-agent
 cd bug-fix-agent
 ```
 
@@ -80,7 +80,7 @@ LLM_PROVIDER=gemini             # "gemini" or other which supports structured mo
 
 # ── Google Gemini ────────────────────────────────────────────────
 GOOGLE_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash   # or gemini-1.5-pro, etc.
+GEMINI_MODEL=gemini-2.5-flash   # Must support structured/JSON output (e.g. gemini-2.5-pro, gemini-2.5-flash)
 
 # ── LangSmith Tracing (optional) ────────────────────────────────
 LANGSMITH_API_KEY=your_langsmith_api_key_here
@@ -173,13 +173,48 @@ bug-fix-agent/
 
 ---
 
+## 🧠 Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| **Multi-turn conversation before planning** | Forces the LLM to gather enough context (reproduction steps, affected function, expected vs. actual output) before committing to a fix plan, reducing hallucinated patches. |
+| **AST-level editing (`libcst`)** | Editing the AST instead of raw strings preserves formatting, avoids off-by-one line errors, and makes patches surgically precise at the function level. |
+| **ChromaDB semantic search** | Simple grep misses semantically related code (e.g. a helper called by the buggy function). Vector search retrieves contextually relevant snippets even when keyword matches fail. |
+| **Structured output (Pydantic `StructuredPlan`)** | Forcing the planner LLM to emit a validated JSON schema eliminates free-form prose responses and makes patch application deterministic. |
+| **LLM-based history compression** | Rather than truncating old messages (losing context), a summarisation LLM condenses older turns into a dense factual summary, keeping the bug history while staying within the token budget. |
+| **Guardrail classifier** | A lightweight LLM classifier runs before every turn to block off-topic messages. Short confirmational replies (`yes`, `ok`, `looks good`) bypass the classifier entirely via a fast-path allowlist to avoid false positives. |
+
+---
+
+## 🔐 Permission System
+
+Every destructive action is gated behind an explicit user prompt — nothing is applied silently. The gates run in order:
+
+```
+1. "Fix ready. Show details?"         → Preview proposed patches (diff view)
+          ↓ yes
+2. "Apply this fix?"                   → Commit to the overall plan
+          ↓ yes
+3. "Apply code patches?"               → Write changes to source files
+          ↓ yes (patches applied)
+4. "Run bash command `<cmd>`?"         → One prompt per bash command in the plan
+          ↓ yes / no (per command)
+5. "Generate test files?"              → Write AI-generated pytest files
+          ↓ yes
+6. "Run tests?"                        → Execute pytest and show results
+```
+
+If any gate is declined the session continues — you can keep chatting and try again, or exit cleanly. A patch retry loop is also available if the patcher fails (e.g. due to a merge conflict).
+
+---
+
 ## ⚙️ Configuration Reference
 
 | Variable | Default | Description |
 |---|---|---|
 | `LLM_PROVIDER` | `gemini` | `gemini` or `ollama` |
 | `GOOGLE_API_KEY` | — | Gemini API key (required for Gemini) |
-| `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model name |
+| `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model name — **must support structured/JSON output** |
 | `OLLAMA_MODEL` | `gemma:2b` | Ollama model name |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
 | `LANGSMITH_API_KEY` | — | LangSmith key (optional) |
